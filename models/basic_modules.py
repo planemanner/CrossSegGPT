@@ -7,14 +7,14 @@ from utils import window_partition, window_unpartition
 from xformers.ops import memory_efficient_attention
 
 class CrossAttention(nn.Module):
-    def __init__(self, query_dim:int, context_dim:int, dim_head:int, ff_dim:int,
+    def __init__(self, query_dim:int, context_dim:int, dim_heads:int, ff_dim:int,
                  num_heads:int, dropout:float=0.1, qkv_bias:bool=False):
         super().__init__()
-        self.q_embed = nn.Linear(query_dim, dim_head * num_heads, bias=qkv_bias)
-        self.kv_embed = nn.Linear(context_dim, 2 * dim_head * num_heads, bias=qkv_bias)
+        self.q_embed = nn.Linear(query_dim, dim_heads * num_heads, bias=qkv_bias)
+        self.kv_embed = nn.Linear(context_dim, 2 * dim_heads * num_heads, bias=qkv_bias)
         self.n_heads = num_heads
         self.dropout = dropout
-        self.ff = nn.Linear(dim_head * num_heads, ff_dim)
+        self.ff = nn.Linear(dim_heads * num_heads, ff_dim)
 
     def forward(self, query, context):
         # query & context shape : B, N, C
@@ -24,10 +24,51 @@ class CrossAttention(nn.Module):
 
         q = self.q_embed(query)
         kv = self.kv_embed(context)
+
         q = q.contiguous().view(B, N_Q, self.n_heads, -1)
         kv = kv.contiguous().view(B, N_C, 2, self.n_heads, -1)
         k, v = kv.unbind(2)
-        return self.ff(memory_efficient_attention(q, k, v, p=self.dropout))
+        x = memory_efficient_attention(q, k, v, p=self.dropout)
+        return self.ff(x.view(B, N_Q, -1))
+
+class MHSA(nn.Module):
+    def __init__(self, input_dim: int, num_heads: int, dim_heads:int, qkv_bias:bool=False,
+                 attn_drop: float=0.0, proj_drop: float=0.0):
+        super().__init__()
+        self.num_heads = num_heads
+        self.attn_drop = attn_drop
+        self.qkv = nn.Linear(input_dim, 3 * num_heads * dim_heads, bias=qkv_bias)
+        self.proj = nn.Linear(num_heads * dim_heads, input_dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+        self.norm = nn.LayerNorm(input_dim)
+
+    def forward(self, x: torch.FloatTensor):
+        B, N, C = x.shape
+        residual = x
+        qkv = self.qkv(x).contiguous().view(B, N, 3, self.num_heads, -1)
+        q, k, v = qkv.unbind(2)
+        x = memory_efficient_attention(q, k, v, attn_bias=None, op=None, p=self.attn_drop)
+        x = x.contiguous().view(B, N, -1)
+        x = residual + self.norm(self.proj(x))
+        return self.proj_drop(x)
+    
+
+class CASABlock(nn.Module):
+    def __init__(self, query_dim, context_dim, dim_heads, ff_dim, num_heads, dropout, qkv_bias, attn_drop, proj_drop):
+        super().__init__()
+        self.cra = CrossAttention(query_dim, context_dim, dim_heads, ff_dim, num_heads, dropout=dropout, qkv_bias=qkv_bias)
+        self.sa = MHSA(query_dim, num_heads, dim_heads, qkv_bias, attn_drop, proj_drop)
+        self.norm = nn.LayerNorm(query_dim)
+        self.proj = nn.Linear(query_dim, query_dim)
+        self.act = nn.GELU()
+    
+    def forward(self, query: torch.FloatTensor, support: torch.FloatTensor):
+        x = self.cra(query, support)
+        x = self.norm(x)
+        x = self.sa(x)
+
+        return self.proj(self.act(x))
+        
 
 class SelfAttention(nn.Module):
     """Multi-head Attention block with relative position embeddings."""
