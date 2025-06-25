@@ -3,7 +3,6 @@
 - All code will be available after publishing in a conference.
 
 # To do
-- 오늘(6.18) ?
-  - 모델 구조 정리
-  - 전처리 정리
-  - 할 수 있으면 전처리까지
+- Dataset 관련 구현
+  - Standardization 이 가능한 dataset 들 끼리 standardization 을 하기 위한 Code 구현
+  - Key Idea 구현

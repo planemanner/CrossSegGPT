@@ -6,15 +6,48 @@ from timm.models.vision_transformer import Mlp
 from utils import window_partition, window_unpartition
 from xformers.ops import memory_efficient_attention
 
+class NoiseInjector(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.weight = nn.Parameter(torch.zeros(1, channels, 1, 1))
+    
+    def forward(self, x, noise=None):
+        if noise is None:
+            B, C, H, W = x.shape
+            noise = torch.randn((B, 1, H, W), device=x.device)
+        
+        return x + self.weight * noise
+
+class DecoderUnit(nn.Module):
+    def __init__(self, input_dim:int, output_dim:int, kernel_size:int=3, scale_factor:int=2, use_noise:bool=False):
+        super().__init__()
+        self.upsampler = nn.ConvTranspose2d(input_dim, input_dim, kernel_size=scale_factor, 
+                                            padding=0, stride=scale_factor, bias=False)
+        self.norm = LayerNorm2D(input_dim)
+        self.act = nn.GELU()
+        assert kernel_size % 2 == 1, f"Kernel size must be an odd number. Given kernel size : {kernel_size}"
+        self.conv = nn.Conv2d(input_dim, output_dim, 
+                              kernel_size, padding=kernel_size//2)
+        
+        if use_noise:        
+            self.noise_injector = NoiseInjector(input_dim)
+        self.use_noise = use_noise
+
+    def forward(self, x):
+        x = self.act(self.norm(self.upsampler(x)))
+        if self.use_noise:
+            x = self.noise_injector(x)
+        return self.conv(x)
+
 class CrossAttention(nn.Module):
-    def __init__(self, query_dim:int, context_dim:int, dim_heads:int, ff_dim:int,
+    def __init__(self, query_dim:int, context_dim:int, dim_head:int,
                  num_heads:int, dropout:float=0.1, qkv_bias:bool=False):
         super().__init__()
-        self.q_embed = nn.Linear(query_dim, dim_heads * num_heads, bias=qkv_bias)
-        self.kv_embed = nn.Linear(context_dim, 2 * dim_heads * num_heads, bias=qkv_bias)
+        self.q_embed = nn.Linear(query_dim, dim_head * num_heads, bias=qkv_bias)
+        self.kv_embed = nn.Linear(context_dim, 2 * dim_head * num_heads, bias=qkv_bias)
         self.n_heads = num_heads
         self.dropout = dropout
-        self.ff = nn.Linear(dim_heads * num_heads, ff_dim)
+        self.ff = nn.Linear(dim_head * num_heads, query_dim)
 
     def forward(self, query, context):
         # query & context shape : B, N, C
@@ -24,55 +57,16 @@ class CrossAttention(nn.Module):
 
         q = self.q_embed(query)
         kv = self.kv_embed(context)
-
         q = q.contiguous().view(B, N_Q, self.n_heads, -1)
         kv = kv.contiguous().view(B, N_C, 2, self.n_heads, -1)
         k, v = kv.unbind(2)
         x = memory_efficient_attention(q, k, v, p=self.dropout)
-        return self.ff(x.view(B, N_Q, -1))
-
-class MHSA(nn.Module):
-    def __init__(self, input_dim: int, num_heads: int, dim_heads:int, qkv_bias:bool=False,
-                 attn_drop: float=0.0, proj_drop: float=0.0):
-        super().__init__()
-        self.num_heads = num_heads
-        self.attn_drop = attn_drop
-        self.qkv = nn.Linear(input_dim, 3 * num_heads * dim_heads, bias=qkv_bias)
-        self.proj = nn.Linear(num_heads * dim_heads, input_dim)
-        self.proj_drop = nn.Dropout(proj_drop)
-        self.norm = nn.LayerNorm(input_dim)
-
-    def forward(self, x: torch.FloatTensor):
-        B, N, C = x.shape
-        residual = x
-        qkv = self.qkv(x).contiguous().view(B, N, 3, self.num_heads, -1)
-        q, k, v = qkv.unbind(2)
-        x = memory_efficient_attention(q, k, v, attn_bias=None, op=None, p=self.attn_drop)
-        x = x.contiguous().view(B, N, -1)
-        x = residual + self.norm(self.proj(x))
-        return self.proj_drop(x)
-    
-
-class CASABlock(nn.Module):
-    def __init__(self, query_dim, context_dim, dim_heads, ff_dim, num_heads, dropout, qkv_bias, attn_drop, proj_drop):
-        super().__init__()
-        self.cra = CrossAttention(query_dim, context_dim, dim_heads, ff_dim, num_heads, dropout=dropout, qkv_bias=qkv_bias)
-        self.sa = MHSA(query_dim, num_heads, dim_heads, qkv_bias, attn_drop, proj_drop)
-        self.norm = nn.LayerNorm(query_dim)
-        self.proj = nn.Linear(query_dim, query_dim)
-        self.act = nn.GELU()
-    
-    def forward(self, query: torch.FloatTensor, support: torch.FloatTensor):
-        x = self.cra(query, support)
-        x = self.norm(x)
-        x = self.sa(x)
-
-        return self.proj(self.act(x))
-        
+        x = x.view(B, N_Q, -1)
+        return self.ff(x)
 
 class SelfAttention(nn.Module):
     """Multi-head Attention block with relative position embeddings."""
-
+    # This is for SegGPT only.
     def __init__(self, dim, num_heads=8, qkv_bias=True):
         """
         Args:
@@ -97,7 +91,46 @@ class SelfAttention(nn.Module):
 
         return x
 
+class MHSA(nn.Module):
+    def __init__(self, input_dim: int, num_heads: int, dim_heads: int=64, 
+                 qkv_bias:bool=False, attn_drop:float=0., proj_drop:float=0.):
+        super().__init__()
+        self.num_heads = num_heads
+        self.attn_drop = attn_drop
+        self.qkv = nn.Linear(input_dim, 3 * num_heads * dim_heads, bias=qkv_bias)        
+        self.proj = nn.Linear(num_heads * dim_heads, input_dim)
+        self.proj_drop = nn.Dropout(proj_drop)
 
+    def forward(self, x: torch.FloatTensor):
+        B, N, C = x.shape
+        
+        qkv = self.qkv(x).contiguous().view(B, N, 3, self.num_heads, -1)
+        q, k, v = qkv.unbind(2)
+        x = memory_efficient_attention(q, k, v, attn_bias=None, op=None, p=self.attn_drop)        
+        x = x.contiguous().view(B,N, -1)
+        x = self.proj(x)
+        return self.proj_drop(x)
+
+class CASABlock(nn.Module):
+    def __init__(self, query_dim, context_dim, dim_heads, 
+                 num_heads, dropout, qkv_bias, attn_drop, proj_drop):
+        super().__init__()
+
+        self.cra = CrossAttention(query_dim, context_dim, dim_heads, num_heads, dropout, qkv_bias)
+        self.sa = MHSA(input_dim=query_dim, num_heads=num_heads, dim_heads=dim_heads, 
+                       qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=proj_drop)
+        self.norm1 = nn.LayerNorm(query_dim)
+        self.norm2 = nn.LayerNorm(query_dim)
+        self.proj = nn.Linear(query_dim, query_dim)
+        self.act = nn.GELU()
+
+    def forward(self, query, support):
+        x = self.cra(query, support)
+        x = self.norm1(x)
+        x = self.sa(x)
+        x = self.norm2(x)
+        return self.proj(self.act(x))
+    
 class Block(nn.Module):
     """Transformer blocks with support of window attention and residual propagation blocks"""
 
@@ -200,5 +233,21 @@ class PatchEmbed(nn.Module):
     def forward(self, x: torch.FloatTensor):
         x = self.embed(x)
         # BCHW -> BHWC
-        x = x.permute(0, 2, 3, 1)
+        b, c, h, w = x.shape
+        x = x.permute(0, 2, 3, 1).view(b, h*w, -1)
         return x
+
+
+if __name__ == "__main__":
+    q_dim, con_dim, dim_head, num_heads, ff_dim = 128, 128, 64, 4, 128
+    cra = CrossAttention(query_dim=q_dim, context_dim=con_dim, 
+                         dim_head=dim_head, num_heads=num_heads, ff_dim=ff_dim).cuda()
+    casa = CASABlock(q_dim, con_dim, dim_head, ff_dim, num_heads, 0, False, 0, 0).cuda()
+
+    bsz, n_support, n_patches = 8, 5, 144
+    query_sample = torch.randn(bsz, n_patches, q_dim).cuda()
+    support_samples = torch.randn(bsz, n_support * n_patches, con_dim).cuda()
+
+    # z = cra(query_sample, support_samples)
+    z2 = casa(query_sample, support_samples)
+    print(z2.shape)

@@ -136,7 +136,6 @@ class SegGPT(nn.Module):
         x = self.patch_embed(imgs)
         y = self.patch_embed(tgts)
         batch_size, Hp, Wp, _ = x.size()
-        seq_len = Hp * Wp
 
         mask_token = self.mask_token.expand(batch_size, Hp, Wp, -1)
         # replace the masked visual tokens by mask_token
@@ -148,10 +147,10 @@ class SegGPT(nn.Module):
         y = y + self.segment_token_y
         if self.pos_embed is not None:
             x = x + get_abs_pos(
-                self.pos_embed, self.pretrain_use_cls_token, (x.shape[1], x.shape[2])
+                self.pos_embed, self.pretrain_use_cls_token, (x.shape[1:3])
             )
             y = y + get_abs_pos(
-                self.pos_embed, self.pretrain_use_cls_token, (y.shape[1], y.shape[2])
+                self.pos_embed, self.pretrain_use_cls_token, (y.shape[1:3])
             )
 
         # add type tokens for cls and ins

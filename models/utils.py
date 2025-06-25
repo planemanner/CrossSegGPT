@@ -3,6 +3,13 @@ import math
 from torch import nn
 import torch
 
+def how_many_trainable_params(model: nn.Module):
+    n_params = 0
+    for param in model.parameters():
+        if param.requires_grad:
+            n_params += param.numel()
+    return n_params 
+
 def token_weight_generator(n_tokens, embed_dim):
     weights = []
     for _ in range(n_tokens):
