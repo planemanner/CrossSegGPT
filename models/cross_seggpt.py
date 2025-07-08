@@ -158,10 +158,6 @@ class CrossSegGPT(L.LightningModule):
     def __init__(self, cfg):
         self.cross_unet = Segmentor(cfg)
     
-    def fewshot_inference(self, query, support_samples):
-        """
-        Interface 잘 꾸려야함
-        """
     def training_step(self, *args: Any, **kwargs: Any) -> Tensor | Mapping[str, Any] | None:
         return super().training_step(*args, **kwargs)
     
@@ -176,6 +172,9 @@ class CrossSegGPT(L.LightningModule):
     
     def on_train_epoch_end(self, ):
         pass
+    
+    def fewshot_inference(self, query, support_samples):
+        pass
 
 def get_num_params(model, unit=1e7):
     n_params = 0
@@ -185,8 +184,8 @@ def get_num_params(model, unit=1e7):
     print(n_params/unit)
 
 if __name__ == "__main__":
-    
-    from dataclasses import dataclass
+    ##
+    from dataclasses import dataclass, field
     from typing import Tuple
 
     @dataclass
@@ -208,7 +207,7 @@ if __name__ == "__main__":
         dec_last_hidden_dim: int=128
         ca_ff_dim: int=256
         dec_partial_dims: Tuple[int]=(384, 256, 128)
-    
+    ##
     seg_model = Segmentor(CrossSegCFG()).cuda()
     get_num_params(seg_model)
     bsz = 4

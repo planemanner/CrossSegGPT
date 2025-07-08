@@ -2,30 +2,31 @@ from basic_modules import *
 from torch.nn import functional as F
 from utils import get_abs_pos, weight_initializer, token_weight_generator
 
-class Decoder(nn.Module):
-    def __init__(self, embed_dim):
-        super().__init__()
-        """
-        self.decoder_embed_dim = decoder_embed_dim
-        self.decoder_embed = nn.Linear(embed_dim*4, patch_size ** 2 * self.decoder_embed_dim, bias=True)  # decoder to patch
-        self.decoder_pred = nn.Sequential(
-                nn.Conv2d(self.decoder_embed_dim, self.decoder_embed_dim, kernel_size=3, padding=1, ),
-                LayerNorm2D(self.decoder_embed_dim),
-                nn.GELU(),
-                nn.Conv2d(self.decoder_embed_dim, 3, kernel_size=1, bias=True), # decoder to patch
-        )
-        """
-    def forward(self, x: torch.FloatTensor):
-        x = torch.cat(x, dim=-1)
-        x = self.decoder_embed(x) # BxhxwxC
-        p = self.patch_size
-        h, w = x.shape[1], x.shape[2]
-        x = x.reshape(shape=(x.shape[0], h, w, p, p, self.decoder_embed_dim))
-        x = torch.einsum('nhwpqc->nchpwq', x)
-        x = x.reshape(shape=(x.shape[0], -1, h * p, w * p))
+# class Decoder(nn.Module):
+#     def __init__(self, embed_dim, patch_size):
+#         super().__init__()
+        
+#         self.decoder_embed_dim = embed_dim
+#         self.patch_size = patch_size
+#         self.decoder_embed = nn.Linear(embed_dim*4, patch_size ** 2 * self.decoder_embed_dim, bias=True)  # decoder to patch
+#         self.decoder_pred = nn.Sequential(
+#                 nn.Conv2d(self.decoder_embed_dim, self.decoder_embed_dim, kernel_size=3, padding=1, ),
+#                 LayerNorm2D(self.decoder_embed_dim),
+#                 nn.GELU(),
+#                 nn.Conv2d(self.decoder_embed_dim, 3, kernel_size=1, bias=True), # decoder to patch
+#         )
+        
+#     def forward(self, x: torch.FloatTensor):
+#         x = torch.cat(x, dim=-1)
+#         x = self.decoder_embed(x) # BxhxwxC
+#         p = self.patch_size
+#         h, w = x.shape[1], x.shape[2]
+#         x = x.reshape(shape=(x.shape[0], h, w, p, p, self.decoder_embed_dim))
+#         x = torch.einsum('nhwpqc->nchpwq', x)
+#         x = x.reshape(shape=(x.shape[0], -1, h * p, w * p))
 
-        x = self.decoder_pred(x) # Bx3xHxW
-        return x        
+#         x = self.decoder_pred(x) # Bx3xHxW
+#         return x        
 
 class SegGPT(nn.Module):
     def __init__(

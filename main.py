@@ -1,14 +1,21 @@
 import argparse
+from trainer import train_cross_seggpt
 
-"""
-mlflow 를 통해 언제든 결과를 reproduce 하기 편하도록 configuration 들도 저장하고 등등...
-"""
 def main(args):
-    """
-    trigger 를 받아서 실행하는 정도...
-    각 process 는 별개로 구현 
-    """
-    pass
+    if args.train:
+        train_cross_seggpt(args)
+
+    if args.evaluation:
+        """
+        Quant & Qual Evals.
+        """
+        pass
+    
+    if args.visualization:
+        """
+        Visualization Only
+        """
+        pass
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -16,6 +23,10 @@ if __name__ == "__main__":
     parser.add_argument('--train', action='store_true')
     parser.add_argument('--evaluation', action='store_true')
     parser.add_argument('--visualization', action='store_true')
-    parser.add_argument('--preprocessing', action='store_true')
-
+    parser.add_argument('--accumulate_grad_batches', type=int, default=1)
+    parser.add_argument('--epochs', type=int, default=1)
+    parser.add_argument('--devices', nargs='+', type=int)
+    parser.add_argument('--exp_name', type=str, default='')
+    parser.add_argument('--mlflow_db_uri', type=str, default='')
+    parser.add_argument('--seed', type=int, default=42)
     args = parser.parse_args()

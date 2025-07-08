@@ -1,7 +1,7 @@
 """
 Wrapping Instance 구현
 """
-from metricspace import _METRIC_FACTORY, MetricName
+from metrics import _METRIC_FACTORY, MetricName
 from typing import Iterable, Dict
 from utils import AverageMeter
 
@@ -36,3 +36,5 @@ class Evaluator:
 if __name__ == "__main__":
     evaler = Evaluator()
     evaler.register_metric('pq')
+    evaler.register_metric('bf1m')
+    evaler.register_metric('miou')

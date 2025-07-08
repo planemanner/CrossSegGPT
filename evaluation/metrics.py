@@ -1,12 +1,14 @@
 import numpy as np
 import cv2
 import math
+from enum import Enum
 
 __all__ = ['compute_iou', 'jaccard_index', 'boundary_f1_score']
 """
 Caution !!!
 모든 Metric 은 Callable object 형태로만 구현
 """
+
 def compute_iou(mask1: np.ndarray, mask2: np.ndarray):
     inter = np.logical_and(mask1, mask2).sum()
     union = np.logical_or(mask1, mask2).sum()
@@ -177,7 +179,7 @@ def boundary_f_measure(foreground_mask, gt_mask, void_pixels=None, bound_th=0.00
     return F
 
 #------------------------------------------------------------------------------------------#
-# GPT 가 생성한 코드이기 때문에 반드시 수정이 필요함.                  
+# GPT 가 생성한 코드이기 때문에 반드시 수정이 필요함.
 #------------------------------------------------------------------------------------------#
 LABEL_DIVISOR = 1000
 VOID_LABEL = 255  # 무시할 픽셀 값
@@ -271,8 +273,16 @@ def panoptic_quality(gt_map: np.ndarray, pred_map: np.ndarray,
         "Categories": n_cat
     }
     return results
+######################## ##########################
+
+class MetricName(Enum):
+    PQ = "pq"  # Panoptic Quality
+    BF1M = "bf1m" # Boundary F1 Score
+    MIOU = "miou" # Mean IoU
 
 
-if __name__ == "__main__":
-    values = [0.7, 0.8, np.nan, 0.9]
-    print(np.nanmean(values))  # 0.8
+_METRIC_FACTORY = {
+    MetricName.PQ: panoptic_quality,
+    MetricName.BF1M: boundary_f_measure,
+    MetricName.MIOU: jaccard_index
+}
